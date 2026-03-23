@@ -13,12 +13,12 @@ import folium
 from streamlit_folium import st_folium
 import requests
 from datetime import datetime
-import base64
 
-# --- CONFIGURATION ---
-UBER_TOKEN = "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xlrf4"
-TELEGRAM_TOKEN = "TON_TOKEN_BOT_TELEGRAM"
-CHAT_ID = "TON_ID_TELEGRAM"
+# --- CONFIGURATION (Utilise tes Secrets Streamlit pour plus de sécurité) ---
+# Si tu n'as pas encore mis les secrets, remplace par tes vrais tokens entre guillemets
+UBER_TOKEN = st.secrets.get("UBER_TOKEN", "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xlrf4")
+TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "TON_TOKEN_BOT_ICI")
+CHAT_ID = st.secrets.get("CHAT_ID", "TON_ID_TELEGRAM_ICI")
 
 SITES = {
     "Commerce": [47.213, -1.558],
@@ -31,68 +31,72 @@ SITES = {
     "Pirmil": [47.199, -1.542]
 }
 
-# --- FONCTIONS ---
+# --- LE MOTEUR (Appels API réels) ---
 def get_surge_real(lat, lng):
-    # Simule l'appel API (à remplacer par ta fonction get_surge complète)
-    return 1.2
+    """Fonction d'origine qui interroge réellement Uber sur 2km (Nord/Sud)"""
+    destinations = [
+        {"lat": lat + 0.018, "lng": lng}, # Nord
+        {"lat": lat - 0.018, "lng": lng}  # Sud
+    ]
+    surges = []
+    headers = {'Authorization': f'Token {UBER_TOKEN}', 'Accept-Language': 'fr_FR'}
+    
+    for dest in destinations:
+        url = (f"https://api.uber.com/v1.2/estimates/price?"
+               f"start_latitude={lat}&start_longitude={lng}&"
+               f"end_latitude={dest['lat']}&end_longitude={dest['lng']}")
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            data = response.json()
+            if 'prices' in data:
+                for p in data['prices']:
+                    if p['display_name'] == 'UberX':
+                        surges.append(p.get('surge_multiplier', 1.0))
+        except:
+            continue
+    
+    return sum(surges) / len(surges) if surges else 1.0
 
-def play_bip():
-    # Petit hack pour jouer un son dans le navigateur
-    audio_html = """
-        <audio autoplay>
-            <source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mpeg">
-        </audio>
-    """
-    st.components.v1.html(audio_html, height=0)
+# --- INTERFACE ---
+st.set_page_config(page_title="Radar Uber Nantes Pro", layout="wide")
 
-# --- INTERFACE STREAMLIT ---
-st.set_page_config(page_title="Radar Pro Nantes", layout="wide")
-
-# Barre latérale pour les contrôles
+# Barre latérale
 with st.sidebar:
-    st.header("⚙️ Réglages")
+    st.header("⚙️ Contrôle Radar")
     prediction_mode = st.toggle("Activer le Mode Prédiction", value=False)
-    st.info("Le mode prédiction anticipe les flux selon l'historique horaire.")
-    if st.button("🔄 Actualiser"):
+    if st.button("🔄 Forcer le Scan"):
         st.rerun()
 
-st.title("🌑 Radar de Demande - Nantes Pro")
+st.title("🌑 Radar Nantes - Mode Pro")
 
-# Logique de prédiction simplifiée
-bonus_prediction = 0
+# Logique de Prédiction
+bonus_pred = 0
 if prediction_mode:
-    heure = datetime.now().hour
-    if 18 <= heure <= 21: # Rush du soir
-        bonus_prediction = 0.2
-        st.warning("🔮 Prédiction : Hausse de la demande détectée (Rush Soir)")
+    h = datetime.now().hour
+    if 18 <= h <= 21: bonus_pred = 0.2
+    st.info(f"🔮 Mode Prédiction Actif (+{bonus_pred} d'anticipation)")
 
-# Création de la carte en MODE SOMBRE
+# Carte Mode Sombre
 m = folium.Map(location=[47.218, -1.553], zoom_start=13, tiles="CartoDB dark_matter")
 
 for name, coords in SITES.items():
-    real_surge = get_surge_real(coords[0], coords[1])
-    current_surge = real_surge + bonus_prediction
-
-    # Calcul visuel : Rayon max 1km (radius ~50) et opacité
-    size = min(current_surge * 15, 50)
-    opacity = min(current_surge - 0.5, 0.9)
-    color = "red" if current_surge >= 1.4 else "orange" if current_surge >= 1.2 else "green"
-
+    # SCAN REEL
+    surge_api = get_surge_real(coords[0], coords[1])
+    final_surge = surge_api + bonus_pred
+    
+    # Visuel dynamique (Rayon 1km max = radius 50)
+    radius_val = min(final_surge * 15, 50)
+    color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
+    
     folium.CircleMarker(
         location=coords,
-        radius=size,
+        radius=radius_val,
         color=color,
         fill=True,
         fill_color=color,
-        fill_opacity=opacity,
-        popup=f"<b>{name}</b><br>Surge: x{current_surge:.2f}",
+        fill_opacity=min(final_surge - 0.6, 0.8) if final_surge > 1.0 else 0.2,
+        popup=f"<b>{name}</b>: x{final_surge:.2f}"
     ).add_to(m)
 
-    # Alertes
-    if current_surge >= 1.4:
-        play_bip()
-        # send_telegram(...) # Ton ancienne fonction
-
-# Affichage
 st_folium(m, width="100%", height=600)
-st.caption(f"Dernier scan : {datetime.now().strftime('%H:%M:%S')}")
+st.caption(f"Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')}")
