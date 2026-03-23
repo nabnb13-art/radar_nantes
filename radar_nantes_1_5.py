@@ -22,7 +22,6 @@ UBER_TOKEN = st.secrets.get("UBER_TOKEN", "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xl
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "TON_TOKEN_BOT")
 CHAT_ID = st.secrets.get("CHAT_ID", "TON_CHAT_ID")
 
-# Liste des SITES mise à jour avec Aéroport et Hangar
 SITES = {
     "Commerce": [47.213, -1.558],
     "Gare": [47.217, -1.542],
@@ -73,7 +72,7 @@ def get_surge_real(lat, lng):
     return sum(surges) / len(surges) if surges else 1.0
 
 # --- INTERFACE ---
-st.set_page_config(page_title="Radar Pro Nantes", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Radar 3KM Nantes", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
@@ -81,13 +80,14 @@ st.markdown("""
     .leaflet-control-attribution {display: none !important;}
     .block-container { padding: 0.5rem 1rem 0rem 1rem !important; }
     .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; }
+    .status-box { background-color: #1e1e1e; border-radius: 10px; padding: 10px; margin-top: 10px; border-left: 5px solid #007bff; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
 # 1. ACTIONS
 cols = st.columns([4, 1])
 with cols[0]:
-    do_scan = st.button("🚀 SCAN PROXIMITÉ (5KM)")
+    do_scan = st.button("🚀 SCAN PROXIMITÉ (3KM)")
 with cols[1]:
     prediction_mode = st.toggle("🔮", value=False)
 
@@ -96,32 +96,46 @@ loc = get_geolocation()
 my_pos = [loc['coords']['latitude'], loc['coords']['longitude']] if loc and 'coords' in loc else [47.218, -1.553]
 
 # 3. CARTE
-m = folium.Map(location=my_pos, zoom_start=13, tiles="CartoDB dark_matter", zoom_control=True)
+m = folium.Map(location=my_pos, zoom_start=14, tiles="CartoDB dark_matter", zoom_control=False)
 LocateControl(auto_start=False, flyTo=True, keepCurrentZoomLevel=True).add_to(m)
 
-# Cercle de zone d'action (5km) en bleu clair
-folium.Circle(location=my_pos, radius=5000, color="#3388ff", weight=2, fill=False, dash_array='5, 10').add_to(m)
+# Cercle de zone d'action (3km)
+folium.Circle(location=my_pos, radius=3000, color="#FF4B4B", weight=2, fill=True, fill_opacity=0.05, dash_array='5, 10').add_to(m)
 
 bonus_pred = 0.2 if (prediction_mode and 18 <= datetime.now().hour <= 21) else 0
 
+# Variables pour le site le plus proche
+closest_site = None
+min_dist = 999.0
+
 for name, coords in SITES.items():
     dist = get_distance(my_pos, coords)
+    
+    # Trouver le plus proche
+    if dist < min_dist:
+        min_dist = dist
+        closest_site = name
+
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
     
-    # Notification Telegram si dans le périmètre (5km) et surge >= 1.2
+    # Notification Telegram (Seulement si à moins de 3km)
     if do_scan and dist <= 3.0 and final_surge >= 1.2:
-        send_telegram(f"🔔 ZONE PROCHE ({dist:.1f}km)\n🔥 {name}: x{final_surge:.2f}")
+        send_telegram(f"⚡ ALERTE PROCHE (3KM)\n🔥 {name}: x{final_surge:.2f}\n📍 Distance: {dist:.1f}km")
 
     color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
     folium.CircleMarker(location=coords, radius=min(final_surge*22, 65), color=color, fill=True, fill_opacity=0.4).add_to(m)
-    folium.Marker(
-        location=coords, 
-        icon=folium.DivIcon(
-            html=f'<div style="font-size: 11pt; color: white; font-weight: bold; text-shadow: 2px 2px #000; width:60px;">x{final_surge:.2f}</div>', 
-            icon_anchor=(15, 7)
-        )
-    ).add_to(m)
+    folium.Marker(location=coords, icon=folium.DivIcon(html=f'<div style="font-size: 11pt; color: white; font-weight: bold; text-shadow: 2px 2px #000; width:60px;">x{final_surge:.2f}</div>', icon_anchor=(15, 7))).add_to(m)
 
-st_folium(m, width="100%", height=580, returned_objects=[])
-st.caption(f"Radar Nantes | {datetime.now().strftime('%H:%M')}")
+# 4. AFFICHAGE
+st_folium(m, width="100%", height=530, returned_objects=[])
+
+# Bandeau Site Proche
+if closest_site:
+    st.markdown(f"""
+    <div class="status-box">
+        <b>📍 Zone la plus proche :</b> {closest_site} à <b>{min_dist:.2f} km</b>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.caption(f"Radar 3km | MàJ: {datetime.now().strftime('%H:%M:%S')}")
