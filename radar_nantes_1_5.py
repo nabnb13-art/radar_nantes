@@ -27,7 +27,9 @@ SITES = {
     "Route de Vannes": [47.234, -1.603],
     "Rezé": [47.191, -1.571],
     "Beaujoire": [47.255, -1.524],
-    "Pirmil": [47.199, -1.542]
+    "Pirmil": [47.199, -1.542],
+    "Aéroport": [47.156, -1.607],
+    "Hangar à Bananes": [47.200, -1.572]
 }
 
 # --- MOTEUR API ---
