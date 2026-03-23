@@ -7,7 +7,7 @@ Original file is located at
     https://colab.research.google.com/gist/nabnb13-art/04b0945e8bbecdbd2171281e403d859f/untitled1.ipynb
 """
 
-!pip install streamlit folium streamlit-folium
+
 import streamlit as st
 import pandas as pd
 import folium
