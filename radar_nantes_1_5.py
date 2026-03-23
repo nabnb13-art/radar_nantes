@@ -10,7 +10,7 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import folium
-from folium.plugins import LocateControl # Nouveau plugin
+from folium.plugins import LocateControl
 from streamlit_folium import st_folium
 import requests
 from datetime import datetime
@@ -52,7 +52,7 @@ def get_surge_real(lat, lng):
 # --- INTERFACE MOBILE ---
 st.set_page_config(page_title="Radar Pro", layout="wide", initial_sidebar_state="collapsed")
 
-# CSS Nettoyage Total (Masque GitHub, Header, Footer)
+# CSS Nettoyage (Barre GitHub cachée)
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -60,6 +60,8 @@ st.markdown("""
     footer {visibility: hidden;}
     .block-container { padding: 0.5rem 1rem 0rem 1rem !important; }
     .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; }
+    /* Style pour les étiquettes de surge sur la carte */
+    .leaflet-tooltip { background: rgba(0,0,0,0.7); color: white; border: none; font-weight: bold; font-size: 12px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -71,37 +73,45 @@ with cols[0]:
 with cols[1]:
     prediction_mode = st.toggle("🔮", value=False)
 
-# 2. GÉOLOCALISATION
-loc = get_geolocation()
-my_pos = None
-if loc and 'coords' in loc:
-    my_pos = [loc['coords']['latitude'], loc['coords']['longitude']]
+# 2. CARTE (Centrée par défaut sur Nantes)
+m = folium.Map(location=[47.218, -1.553], zoom_start=13, tiles="CartoDB dark_matter", zoom_control=False)
 
-# 3. CARTE
-center = my_pos if my_pos else [47.218, -1.553]
-m = folium.Map(location=center, zoom_start=14, tiles="CartoDB dark_matter", zoom_control=False)
-
-# AJOUT DU BOUTON DE RECENTRAGE (LocateControl)
-LocateControl(auto_start=False, flyTo=True, keepCurrentZoomLevel=True).add_to(m)
-
-if my_pos:
-    folium.Marker(my_pos, icon=folium.Icon(color='blue', icon='user', prefix='fa')).add_to(m)
+# BOUTON DE RECENTRAGE (Gère ton point bleu tout seul)
+LocateControl(
+    auto_start=False, 
+    flyTo=True, 
+    keepCurrentZoomLevel=True,
+    strings={"title": "Ma position"}
+).add_to(m)
 
 bonus_pred = 0.2 if (prediction_mode and 18 <= datetime.now().hour <= 21) else 0
 
+# 3. BOUCLE DES SITES AVEC SURGE EXACT
 for name, coords in SITES.items():
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
-    radius_val = min(final_surge * 22, 65)
-    color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
     
+    color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
+    radius_val = min(final_surge * 22, 65)
+    
+    # Le cercle
     folium.CircleMarker(
-        location=coords, radius=radius_val, color=color, fill=True,
-        fill_color=color, fill_opacity=0.5,
-        popup=f"{name}: x{final_surge:.2f}"
+        location=coords,
+        radius=radius_val,
+        color=color,
+        fill=True,
+        fill_color=color,
+        fill_opacity=0.4,
     ).add_to(m)
 
-# Affichage carte
-st_folium(m, width="100%", height=580, returned_objects=[])
+    # L'ÉTIQUETTE (S'affiche en permanence au centre du cercle)
+    folium.Marker(
+        location=coords,
+        icon=folium.DivIcon(
+            html=f'<div style="font-size: 10pt; color: white; font-weight: bold; text-shadow: 1px 1px #000; width: 50px;">x{final_surge:.2f}</div>',
+            icon_anchor=(15, 7)
+        )
+    ).add_to(m)
 
-st.caption(f"Dernier Scan: {datetime.now().strftime('%H:%M:%S')}")
+st_folium(m, width="100%", height=580, returned_objects=[])
+st.caption(f"MàJ: {datetime.now().strftime('%H:%M:%S')}")
