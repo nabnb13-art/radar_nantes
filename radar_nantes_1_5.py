@@ -10,6 +10,7 @@ Original file is located at
 import streamlit as st
 import pandas as pd
 import folium
+from folium.plugins import LocateControl # Nouveau plugin
 from streamlit_folium import st_folium
 import requests
 from datetime import datetime
@@ -51,18 +52,18 @@ def get_surge_real(lat, lng):
 # --- INTERFACE MOBILE ---
 st.set_page_config(page_title="Radar Pro", layout="wide", initial_sidebar_state="collapsed")
 
-# Correction du CSS (Paramètre unsafe_allow_html=True)
+# CSS Nettoyage Total (Masque GitHub, Header, Footer)
 st.markdown("""
     <style>
-    .block-container { padding: 1rem 1rem 0rem 1rem !important; }
-    .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; font-size: 1.1em; }
-    div[data-testid="stHorizontalBlock"] { align-items: center; }
     #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
     footer {visibility: hidden;}
+    .block-container { padding: 0.5rem 1rem 0rem 1rem !important; }
+    .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# 1. BARRE D'ACTION (Bouton et Mode)
+# 1. ACTIONS
 cols = st.columns([4, 1])
 with cols[0]:
     if st.button("🚀 SCAN NANTES"):
@@ -80,6 +81,9 @@ if loc and 'coords' in loc:
 center = my_pos if my_pos else [47.218, -1.553]
 m = folium.Map(location=center, zoom_start=14, tiles="CartoDB dark_matter", zoom_control=False)
 
+# AJOUT DU BOUTON DE RECENTRAGE (LocateControl)
+LocateControl(auto_start=False, flyTo=True, keepCurrentZoomLevel=True).add_to(m)
+
 if my_pos:
     folium.Marker(my_pos, icon=folium.Icon(color='blue', icon='user', prefix='fa')).add_to(m)
 
@@ -88,7 +92,7 @@ bonus_pred = 0.2 if (prediction_mode and 18 <= datetime.now().hour <= 21) else 0
 for name, coords in SITES.items():
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
-    radius_val = min(final_surge * 22, 65) # Cercles bien visibles sur mobile
+    radius_val = min(final_surge * 22, 65)
     color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
     
     folium.CircleMarker(
@@ -98,6 +102,6 @@ for name, coords in SITES.items():
     ).add_to(m)
 
 # Affichage carte
-st_folium(m, width="100%", height=550, returned_objects=[])
+st_folium(m, width="100%", height=580, returned_objects=[])
 
-st.caption(f"MàJ: {datetime.now().strftime('%H:%M:%S')} | Préd: +{bonus_pred}")
+st.caption(f"Dernier Scan: {datetime.now().strftime('%H:%M:%S')}")
