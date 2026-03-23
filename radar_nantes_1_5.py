@@ -96,7 +96,7 @@ loc = get_geolocation()
 my_pos = [loc['coords']['latitude'], loc['coords']['longitude']] if loc and 'coords' in loc else [47.218, -1.553]
 
 # 3. CARTE
-m = folium.Map(location=my_pos, zoom_start=13, tiles="CartoDB dark_matter", zoom_control=False)
+m = folium.Map(location=my_pos, zoom_start=13, tiles="CartoDB dark_matter", zoom_control=True)
 LocateControl(auto_start=False, flyTo=True, keepCurrentZoomLevel=True).add_to(m)
 
 # Cercle de zone d'action (5km) en bleu clair
@@ -110,7 +110,7 @@ for name, coords in SITES.items():
     final_surge = surge_api + bonus_pred
     
     # Notification Telegram si dans le périmètre (5km) et surge >= 1.2
-    if do_scan and dist <= 5.0 and final_surge >= 1.2:
+    if do_scan and dist <= 3.0 and final_surge >= 1.2:
         send_telegram(f"🔔 ZONE PROCHE ({dist:.1f}km)\n🔥 {name}: x{final_surge:.2f}")
 
     color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
