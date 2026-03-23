@@ -13,12 +13,10 @@ import folium
 from streamlit_folium import st_folium
 import requests
 from datetime import datetime
-from streamlit_js_eval import get_geolocation # Ajout pour le GPS
+from streamlit_js_eval import get_geolocation
 
 # --- CONFIGURATION ---
 UBER_TOKEN = st.secrets.get("UBER_TOKEN", "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xlrf4")
-TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "TON_TOKEN_BOT_ICI")
-CHAT_ID = st.secrets.get("CHAT_ID", "TON_ID_TELEGRAM_ICI")
 
 SITES = {
     "Commerce": [47.213, -1.558],
@@ -50,54 +48,58 @@ def get_surge_real(lat, lng):
         except: continue
     return sum(surges) / len(surges) if surges else 1.0
 
-# --- INTERFACE ---
-st.set_page_config(page_title="Radar Uber Nantes Pro", layout="wide")
+# --- INTERFACE MOBILE-FIRST ---
+st.set_page_config(page_title="Radar Pro", layout="wide", initial_sidebar_state="collapsed")
 
-# RÉCUPÉRATION GÉOLOCALISATION (Point Bleu)
+# CSS pour supprimer les marges et optimiser le plein écran
+st.markdown("""
+    <style>
+    .reportview-container .main .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #007bff; color: white; font-weight: bold; }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+    """, unsafe_allow_name_p=True)
+
+# 1. BOUTON SCAN (Tout en haut pour le pouce)
+col1, col2 = st.columns([3, 1])
+with col1:
+    if st.button("🚀 FORCER LE SCAN"):
+        st.rerun()
+with col2:
+    prediction_mode = st.toggle("🔮", value=False, help="Mode Prédiction")
+
+# 2. GÉOLOCALISATION
 loc = get_geolocation()
 my_pos = None
 if loc and 'coords' in loc:
     my_pos = [loc['coords']['latitude'], loc['coords']['longitude']]
 
-with st.sidebar:
-    st.header("⚙️ Contrôle Radar")
-    prediction_mode = st.toggle("Activer le Mode Prédiction", value=False)
-    if st.button("🔄 Forcer le Scan"):
-        st.rerun()
-
-st.title("🌑 Radar Nantes - Mode Pro")
-
-# Logique de Prédiction
-bonus_pred = 0
-if prediction_mode:
-    h = datetime.now().hour
-    if 18 <= h <= 21: bonus_pred = 0.2
-    st.info(f"🔮 Mode Prédiction Actif (+{bonus_pred})")
-
-# Carte (Centrée sur toi si détecté, sinon centre Nantes)
+# 3. CARTE PLEIN ÉCRAN
 center = my_pos if my_pos else [47.218, -1.553]
-m = folium.Map(location=center, zoom_start=14, tiles="CartoDB dark_matter")
+m = folium.Map(location=center, zoom_start=14, tiles="CartoDB dark_matter", zoom_control=False)
 
-# Marqueur MOI
+# Marqueur "MOI"
 if my_pos:
-    folium.Marker(
-        location=my_pos,
-        popup="Ma position actuelle",
-        icon=folium.Icon(color='blue', icon='user', prefix='fa')
-    ).add_to(m)
+    folium.Marker(my_pos, icon=folium.Icon(color='blue', icon='user', prefix='fa')).add_to(m)
 
-# Marqueurs SITES
+# Logique de bonus (pour l'instant reste fixe selon ton souhait précédent)
+bonus_pred = 0.2 if (prediction_mode and 18 <= datetime.now().hour <= 21) else 0
+
+# Boucle Sites
 for name, coords in SITES.items():
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
-    radius_val = min(final_surge * 18, 55)
+    radius_val = min(final_surge * 20, 60) # Cercles un peu plus grands pour mobile
     color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
     
     folium.CircleMarker(
         location=coords, radius=radius_val, color=color, fill=True,
-        fill_color=color, fill_opacity=0.4,
-        popup=f"<b>{name}</b>: x{final_surge:.2f}"
+        fill_color=color, fill_opacity=0.5,
+        popup=f"{name}: x{final_surge:.2f}"
     ).add_to(m)
 
-st_folium(m, width="100%", height=600)
-st.caption(f"Dernier scan : {datetime.now().strftime('%H:%M:%S')}")
+# Affichage de la carte
+st_folium(m, width="100%", height=500, returned_objects=[])
+
+st.caption(f"MàJ: {datetime.now().strftime('%H:%M:%S')} | Surge +{bonus_pred}")
