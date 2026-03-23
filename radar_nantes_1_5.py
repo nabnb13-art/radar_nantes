@@ -13,9 +13,9 @@ import folium
 from streamlit_folium import st_folium
 import requests
 from datetime import datetime
+from streamlit_js_eval import get_geolocation # Ajout pour le GPS
 
-# --- CONFIGURATION (Utilise tes Secrets Streamlit pour plus de sécurité) ---
-# Si tu n'as pas encore mis les secrets, remplace par tes vrais tokens entre guillemets
+# --- CONFIGURATION ---
 UBER_TOKEN = st.secrets.get("UBER_TOKEN", "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xlrf4")
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "TON_TOKEN_BOT_ICI")
 CHAT_ID = st.secrets.get("CHAT_ID", "TON_ID_TELEGRAM_ICI")
@@ -31,36 +31,34 @@ SITES = {
     "Pirmil": [47.199, -1.542]
 }
 
-# --- LE MOTEUR (Appels API réels) ---
+# --- MOTEUR API ---
 def get_surge_real(lat, lng):
-    """Fonction d'origine qui interroge réellement Uber sur 2km (Nord/Sud)"""
-    destinations = [
-        {"lat": lat + 0.018, "lng": lng}, # Nord
-        {"lat": lat - 0.018, "lng": lng}  # Sud
-    ]
+    destinations = [{"lat": lat + 0.018, "lng": lng}, {"lat": lat - 0.018, "lng": lng}]
     surges = []
     headers = {'Authorization': f'Token {UBER_TOKEN}', 'Accept-Language': 'fr_FR'}
-    
     for dest in destinations:
         url = (f"https://api.uber.com/v1.2/estimates/price?"
                f"start_latitude={lat}&start_longitude={lng}&"
                f"end_latitude={dest['lat']}&end_longitude={dest['lng']}")
         try:
-            response = requests.get(url, headers=headers, timeout=10)
-            data = response.json()
+            r = requests.get(url, headers=headers, timeout=10)
+            data = r.json()
             if 'prices' in data:
                 for p in data['prices']:
                     if p['display_name'] == 'UberX':
                         surges.append(p.get('surge_multiplier', 1.0))
-        except:
-            continue
-    
+        except: continue
     return sum(surges) / len(surges) if surges else 1.0
 
 # --- INTERFACE ---
 st.set_page_config(page_title="Radar Uber Nantes Pro", layout="wide")
 
-# Barre latérale
+# RÉCUPÉRATION GÉOLOCALISATION (Point Bleu)
+loc = get_geolocation()
+my_pos = None
+if loc and 'coords' in loc:
+    my_pos = [loc['coords']['latitude'], loc['coords']['longitude']]
+
 with st.sidebar:
     st.header("⚙️ Contrôle Radar")
     prediction_mode = st.toggle("Activer le Mode Prédiction", value=False)
@@ -74,29 +72,32 @@ bonus_pred = 0
 if prediction_mode:
     h = datetime.now().hour
     if 18 <= h <= 21: bonus_pred = 0.2
-    st.info(f"🔮 Mode Prédiction Actif (+{bonus_pred} d'anticipation)")
+    st.info(f"🔮 Mode Prédiction Actif (+{bonus_pred})")
 
-# Carte Mode Sombre
-m = folium.Map(location=[47.218, -1.553], zoom_start=13, tiles="CartoDB dark_matter")
+# Carte (Centrée sur toi si détecté, sinon centre Nantes)
+center = my_pos if my_pos else [47.218, -1.553]
+m = folium.Map(location=center, zoom_start=14, tiles="CartoDB dark_matter")
 
+# Marqueur MOI
+if my_pos:
+    folium.Marker(
+        location=my_pos,
+        popup="Ma position actuelle",
+        icon=folium.Icon(color='blue', icon='user', prefix='fa')
+    ).add_to(m)
+
+# Marqueurs SITES
 for name, coords in SITES.items():
-    # SCAN REEL
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
-    
-    # Visuel dynamique (Rayon 1km max = radius 50)
-    radius_val = min(final_surge * 15, 50)
+    radius_val = min(final_surge * 18, 55)
     color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
     
     folium.CircleMarker(
-        location=coords,
-        radius=radius_val,
-        color=color,
-        fill=True,
-        fill_color=color,
-        fill_opacity=min(final_surge - 0.6, 0.8) if final_surge > 1.0 else 0.2,
+        location=coords, radius=radius_val, color=color, fill=True,
+        fill_color=color, fill_opacity=0.4,
         popup=f"<b>{name}</b>: x{final_surge:.2f}"
     ).add_to(m)
 
 st_folium(m, width="100%", height=600)
-st.caption(f"Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')}")
+st.caption(f"Dernier scan : {datetime.now().strftime('%H:%M:%S')}")
