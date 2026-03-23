@@ -15,10 +15,14 @@ from streamlit_folium import st_folium
 import requests
 from datetime import datetime
 from streamlit_js_eval import get_geolocation
+import math
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION (Secrets Streamlit) ---
 UBER_TOKEN = st.secrets.get("UBER_TOKEN", "h9A73ihoqHbvhOTurEmknI578lE0oJ3_Oa9Xlrf4")
+TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "TON_TOKEN_BOT")
+CHAT_ID = st.secrets.get("CHAT_ID", "TON_CHAT_ID")
 
+# Liste des SITES mise à jour avec Aéroport et Hangar
 SITES = {
     "Commerce": [47.213, -1.558],
     "Gare": [47.217, -1.542],
@@ -32,7 +36,24 @@ SITES = {
     "Hangar à Bananes": [47.200, -1.572]
 }
 
-# --- MOTEUR API ---
+# --- CALCUL DE DISTANCE ---
+def get_distance(pos1, pos2):
+    R = 6371 
+    lat1, lon1 = math.radians(pos1[0]), math.radians(pos1[1])
+    lat2, lon2 = math.radians(pos2[0]), math.radians(pos2[1])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1-a)))
+
+# --- FONCTION TELEGRAM ---
+def send_telegram(message):
+    if TELEGRAM_TOKEN and CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        try:
+            requests.post(url, data={"chat_id": CHAT_ID, "text": message}, timeout=5)
+        except: pass
+
+# --- MOTEUR API UBER ---
 def get_surge_real(lat, lng):
     destinations = [{"lat": lat + 0.018, "lng": lng}, {"lat": lat - 0.018, "lng": lng}]
     surges = []
@@ -51,67 +72,53 @@ def get_surge_real(lat, lng):
         except: continue
     return sum(surges) / len(surges) if surges else 1.0
 
-# --- INTERFACE MOBILE ---
-st.set_page_config(page_title="Radar Pro", layout="wide", initial_sidebar_state="collapsed")
+# --- INTERFACE ---
+st.set_page_config(page_title="Radar Pro Nantes", layout="wide", initial_sidebar_state="collapsed")
 
-# CSS Nettoyage Extrême (Barre GitHub + Menu + Crédits Leaflet)
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    .leaflet-control-attribution {display: none !important;} /* Supprime les pieds du plan */
+    #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
+    .leaflet-control-attribution {display: none !important;}
     .block-container { padding: 0.5rem 1rem 0rem 1rem !important; }
     .stButton>button { width: 100%; border-radius: 8px; height: 3.5em; background-color: #007bff; color: white; font-weight: bold; }
-    .leaflet-tooltip { background: rgba(0,0,0,0.8); color: white; border: none; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 # 1. ACTIONS
 cols = st.columns([4, 1])
 with cols[0]:
-    if st.button("🚀 SCAN NANTES"):
-        st.rerun()
+    do_scan = st.button("🚀 SCAN PROXIMITÉ (5KM)")
 with cols[1]:
     prediction_mode = st.toggle("🔮", value=False)
 
 # 2. GÉOLOCALISATION
 loc = get_geolocation()
-my_pos = None
-if loc and 'coords' in loc:
-    my_pos = [loc['coords']['latitude'], loc['coords']['longitude']]
+my_pos = [loc['coords']['latitude'], loc['coords']['longitude']] if loc and 'coords' in loc else [47.218, -1.553]
 
-# 3. CARTE (Recentrage auto sur toi si position dispo lors du scan)
-center_map = my_pos if my_pos else [47.218, -1.553]
-m = folium.Map(
-    location=center_map, 
-    zoom_start=14, 
-    tiles="CartoDB dark_matter", 
-    zoom_control=False,
-    control_scale=False # Enlève aussi l'échelle pour plus de clarté
-)
-
-# Bouton de recentrage dynamique (Point bleu natif)
+# 3. CARTE
+m = folium.Map(location=my_pos, zoom_start=13, tiles="CartoDB dark_matter", zoom_control=False)
 LocateControl(auto_start=False, flyTo=True, keepCurrentZoomLevel=True).add_to(m)
+
+# Cercle de zone d'action (5km) en bleu clair
+folium.Circle(location=my_pos, radius=5000, color="#3388ff", weight=2, fill=False, dash_array='5, 10').add_to(m)
 
 bonus_pred = 0.2 if (prediction_mode and 18 <= datetime.now().hour <= 21) else 0
 
-# Boucle des sites
 for name, coords in SITES.items():
+    dist = get_distance(my_pos, coords)
     surge_api = get_surge_real(coords[0], coords[1])
     final_surge = surge_api + bonus_pred
-    color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
-    radius_val = min(final_surge * 22, 65)
     
-    folium.CircleMarker(
-        location=coords, radius=radius_val, color=color, fill=True,
-        fill_color=color, fill_opacity=0.4,
-    ).add_to(m)
+    # Notification Telegram si dans le périmètre (5km) et surge >= 1.2
+    if do_scan and dist <= 5.0 and final_surge >= 1.2:
+        send_telegram(f"🔔 ZONE PROCHE ({dist:.1f}km)\n🔥 {name}: x{final_surge:.2f}")
 
+    color = "red" if final_surge >= 1.4 else "orange" if final_surge >= 1.2 else "green"
+    folium.CircleMarker(location=coords, radius=min(final_surge*22, 65), color=color, fill=True, fill_opacity=0.4).add_to(m)
     folium.Marker(
-        location=coords,
+        location=coords, 
         icon=folium.DivIcon(
-            html=f'<div style="font-size: 11pt; color: white; font-weight: bold; text-shadow: 2px 2px #000; width: 60px;">x{final_surge:.2f}</div>',
+            html=f'<div style="font-size: 11pt; color: white; font-weight: bold; text-shadow: 2px 2px #000; width:60px;">x{final_surge:.2f}</div>', 
             icon_anchor=(15, 7)
         )
     ).add_to(m)
